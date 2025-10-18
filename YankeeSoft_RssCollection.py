@@ -3,6 +3,7 @@ import feedparser
 from datetime import datetime
 from time import mktime
 import streamlit as st
+from collections import defaultdict
 
 st.divider()
 st.subheader("News RSS — subscriptions & keyword filter")
@@ -96,13 +97,41 @@ if feeds:
             return any(k in blob for k in keywords)
         articles = [a for a in articles if hit(a)]
 
-    st.caption(f"Showing {len(articles)} articles from {len(feeds)} feed(s).")
+    st.caption(f"Showing {len(articles)} articles across {len(set(a['feed'] for a in articles))} source(s).")
+    # --- Group by source ---
+    groups = defaultdict(list)
     for a in articles:
-        with st.container(border=True):
-            st.markdown(f"**{a['title']}**  \n{a['feed']}"
-                        + (f" · {a['published'].strftime('%Y-%m-%d %H:%M')}" if a['published'] else ""))
-            if a["summary"]:
-                st.write(a["summary"], unsafe_allow_html=True)
-            st.markdown(f"[Open article]({a['link']})")
+        groups[a["feed"]].append(a)
+
+
+    # Helper: latest time in a group
+    def latest_time(lst):
+        return max((x["published"] or datetime.min for x in lst), default=datetime.min)
+
+
+    # Sort sources by their latest article (newest first)
+    sorted_feeds = sorted(groups.items(), key=lambda kv: latest_time(kv[1]), reverse=True)
+
+    # --- Render per-source fold/unfold sections ---
+    for feed_name, items in sorted_feeds:
+        items.sort(key=lambda x: x["published"] or datetime.min, reverse=True)
+        latest = latest_time(items)
+        header = f"{feed_name} — {len(items)}"
+        if latest != datetime.min:
+            header += f" • latest {latest.strftime('%Y-%m-%d %H:%M')}"
+
+        with st.expander(header, expanded=False):  # each source can be opened/closed independently
+            for i, a in enumerate(items):
+                with st.container(border=True):
+                    title = a["title"] or "(no title)"
+                    meta = []
+                    if a["published"]:
+                        meta.append(a["published"].strftime("%Y-%m-%d %H:%M"))
+                    meta.append(feed_name)
+                    st.markdown(f"**{title}**  \n" + " · ".join(meta))
+                    if a["summary"]:
+                        st.write(a["summary"], unsafe_allow_html=True)
+                    if a["link"]:
+                        st.markdown(f"[Open article]({a['link']})")
 else:
     st.info("Add at least one RSS feed in the sidebar to get started.")
